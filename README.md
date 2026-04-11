@@ -52,17 +52,17 @@ export TAVILY_API_KEY="tvly-dev-your-tavily-key-here"
 
 ## 🚀 설치
 
-### 옵션 A — `/plugin` 명령으로 바로 설치 (권장)
+### 옵션 A — `/plugin` 명령으로 설치 (권장)
 
-Claude Code 세션에서 다음 두 명령만 실행하면 됩니다:
+이 플러그인은 [`today8934/wooksang-marketplace`](https://github.com/today8934/wooksang-marketplace)에 인덱싱돼 있습니다. Claude Code 세션에서 다음 두 명령만 실행하세요:
 
 ```
-/plugin marketplace add today8934/overnight-market-report-plugin
+/plugin marketplace add today8934/wooksang-marketplace
 /plugin install overnight-market-report-plugin@wooksang-marketplace
 ```
 
-- 첫 번째 명령이 이 repo를 `wooksang-marketplace`로 등록
-- 두 번째 명령이 마켓플레이스에서 플러그인을 찾아 설치
+- 첫 번째 명령이 `wooksang-marketplace`를 등록 (여러 플러그인이 인덱싱된 마켓플레이스 인덱스)
+- 두 번째 명령이 이 `overnight-market-report-plugin`을 설치
 - 설치 후 Claude Code를 재시작하면 MCP 서버(finnhub·alphavantage·tavily)가 자동 로드됨
 - `/mcp`로 세 서버 모두 `✓ Connected` 상태인지 확인
 
