@@ -1,0 +1,29 @@
+# Claude Code local settings (contain API keys and personal config)
+.claude/*.local.md
+.claude/settings.local.json
+
+# oh-my-claudecode runtime state (local session tracking, should not ship)
+.omc/
+
+# macOS
+.DS_Store
+
+# Editor
+.vscode/
+.idea/
+*.swp
+*~
+
+# Node / npm
+node_modules/
+npm-debug.log
+
+# Logs
+*.log
+
+# OS
+Thumbs.db
+
+# Test outputs (generated reports should not be committed)
+/test-output/
+/example-output/

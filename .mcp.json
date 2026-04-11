@@ -1,0 +1,28 @@
+{
+  "mcpServers": {
+    "finnhub": {
+      "type": "stdio",
+      "command": "npx",
+      "args": ["-y", "@aigroup/finnhub-mcp"],
+      "env": {
+        "FINNHUB_API_KEY": "${FINNHUB_API_KEY}"
+      }
+    },
+    "alphavantage": {
+      "type": "stdio",
+      "command": "npx",
+      "args": ["-y", "alpha-vantage-mcp"],
+      "env": {
+        "ALPHA_VANTAGE_API_KEY": "${ALPHA_VANTAGE_API_KEY}"
+      }
+    },
+    "tavily": {
+      "type": "stdio",
+      "command": "npx",
+      "args": ["-y", "tavily-mcp@latest"],
+      "env": {
+        "TAVILY_API_KEY": "${TAVILY_API_KEY}"
+      }
+    }
+  }
+}
