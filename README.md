@@ -52,27 +52,29 @@ export TAVILY_API_KEY="tvly-dev-your-tavily-key-here"
 
 ## 🚀 설치
 
-### 옵션 A — 로컬 디렉토리로 테스트
+### 옵션 A — `/plugin` 명령으로 바로 설치 (권장)
+
+Claude Code 세션에서 다음 두 명령만 실행하면 됩니다:
+
+```
+/plugin marketplace add today8934/overnight-market-report-plugin
+/plugin install overnight-market-report-plugin@wooksang-marketplace
+```
+
+- 첫 번째 명령이 이 repo를 `wooksang-marketplace`로 등록
+- 두 번째 명령이 마켓플레이스에서 플러그인을 찾아 설치
+- 설치 후 Claude Code를 재시작하면 MCP 서버(finnhub·alphavantage·tavily)가 자동 로드됨
+- `/mcp`로 세 서버 모두 `✓ Connected` 상태인지 확인
+
+### 옵션 B — 로컬 clone 후 개발/테스트
+
 ```bash
 git clone https://github.com/today8934/overnight-market-report-plugin.git
 cd overnight-market-report-plugin
 claude --plugin-dir .
 ```
 
-### 옵션 B — Claude Code 플러그인 마켓플레이스에 추가
-프로젝트 또는 사용자 전역 `~/.claude/` 설정의 `.claude-plugin/marketplace.json`에 아래 항목을 추가한 뒤 Claude Code에서 `/plugin install` 실행:
-```json
-{
-  "plugins": [
-    {
-      "name": "overnight-market-report-plugin",
-      "source": "github:today8934/overnight-market-report-plugin"
-    }
-  ]
-}
-```
-
-설치 후 Claude Code를 재시작하면 MCP 서버(finnhub·alphavantage·tavily)가 자동으로 로드됩니다. `/mcp` 명령으로 세 서버가 모두 `✓ Connected` 상태인지 확인하세요.
+로컬에서 스킬이나 프롬프트를 수정해보면서 즉시 테스트할 때 사용합니다.
 
 ---
 
