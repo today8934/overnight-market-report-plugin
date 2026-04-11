@@ -19,6 +19,10 @@ description: 간밤 미국 증시(지수·섹터·주요 종목)와 국제정세
 
 ## 실행 순서
 
+0. **Preflight check (매 실행 가장 먼저, 무조건)** — `Agent` tool로 `preflight-check` subagent를 1회 실행해 finnhub·alphavantage·tavily 세 MCP 서버가 정상 동작하는지 확인
+   - 반환 JSON의 `overall == "ready"` → Step 1로 진행
+   - `overall == "needs_setup"` → **메인 워크플로우(Step 1~7) 진행 즉시 중단**하고 메인 세션에서 **Setup Wizard** 실행 후 사용자에게 재시작 안내하고 halt
+   - 자세한 프롬프트와 Wizard 절차는 아래 **"Preflight & Setup Wizard"** 섹션 참조
 1. 오늘 한국 날짜·시각(KST) 확인 → 파일 경로 결정
 2. 출력 디렉토리 확인/생성
 3. **한 메시지에서 병렬 실행** (하이브리드 오케스트레이션):
@@ -30,6 +34,116 @@ description: 간밤 미국 증시(지수·섹터·주요 종목)와 국제정세
 5. 템플릿에 채워 md 파일 작성 — **데이터 품질 & 소스 섹션은 반드시 리포트 말미**. TL;DR이 최상단. (자세한 순서는 "보고서 템플릿" 섹션 참조)
 6. **`Agent` tool로 readability-pass subagent 1회** (순차 실행, 원본 저장 완료 후) — 완성된 리포트를 입력받아 주식 입문자용 `-쉬운버전.md`를 같은 디렉토리에 생성. 자세한 프롬프트는 "Readability-pass subagent" 섹션 참조
 7. 사용자에게 **원본 + 쉬운버전 두 저장 경로 + TL;DR**만 짧게 보고 — 본문 전체를 채팅에 다시 붙여넣지 마세요
+
+## Preflight & Setup Wizard
+
+처음 설치한 사용자가 **README를 전혀 읽지 않고도** 즉시 사용할 수 있도록, 매 실행 전에 3개 MCP 서버의 상태를 자동 확인하고 필요 시 API 키 설정을 대화형으로 안내합니다. 이 플러그인은 `.mcp.json`을 포함하지 않으므로(치환 이슈 회피), MCP 등록은 **사용자별 `claude mcp add` CLI 호출**로 이뤄집니다.
+
+### 🔎 preflight-check subagent
+
+`Agent` tool (`subagent_type: general-purpose`)로 아래 프롬프트를 전달. 응답은 30초 이내 **JSON 하나만** 반환하도록 엄격 제약.
+
+```
+역할: overnight-market-report-plugin이 사용하는 3개 MCP 서버의 정상 동작 여부를 확인하는 preflight checker. 오직 상태 판정과 JSON 반환만 수행.
+
+## 검증 대상
+1. `mcp__finnhub__finnhub_stock_market_data` — 미국 주식 시세
+2. `mcp__alphavantage__get_forex_rate` — 환율
+3. `mcp__tavily__tavily_search` — 뉴스 검색
+
+## 절차
+1. ToolSearch로 세 도구 스키마를 한 번에 로드 시도:
+   ToolSearch(query="select:mcp__finnhub__finnhub_stock_market_data,mcp__alphavantage__get_forex_rate,mcp__tavily__tavily_search", max_results=5)
+
+2. 로드에 성공한 도구들을 **한 메시지에서 병렬**로 테스트 호출:
+   - finnhub: operation="get_quote", symbol="SPY"
+   - alphavantage: from_currency="USD", to_currency="KRW"
+   - tavily: query="test", max_results=5
+
+3. 각 결과를 아래 분류로 판정:
+   - **ok**: 유효 JSON + 실제 데이터 (finnhub의 `c` 필드 > 0, alphavantage의 `Realtime Currency Exchange Rate` 키 존재, tavily의 `results` 배열 길이 > 0)
+   - **not_loaded**: ToolSearch가 해당 도구 스키마를 반환하지 않음 (MCP 서버 자체가 미등록)
+   - **auth_error**: 응답 본문에 "401" / "invalid" / "unauthorized" / "api key" / "authentication" 같은 단어가 포함된 에러
+   - **other_error**: 기타 실패 (네트워크, 레이트리밋, 스키마 불일치 등)
+
+4. 아래 형식으로만 반환 (**JSON 객체 하나만**, 다른 텍스트 일절 금지):
+
+{
+  "overall": "ready" 또는 "needs_setup",
+  "checks": {
+    "finnhub":      { "status": "<ok|not_loaded|auth_error|other_error>", "detail": "한 줄 요약" },
+    "alphavantage": { "status": "<ok|not_loaded|auth_error|other_error>", "detail": "한 줄 요약" },
+    "tavily":       { "status": "<ok|not_loaded|auth_error|other_error>", "detail": "한 줄 요약" }
+  }
+}
+
+- `overall`은 세 status가 모두 `ok`면 `"ready"`, 그 외엔 `"needs_setup"`
+- `detail`은 실패 시 에러 메시지 첫 100자 이하 요약, 성공 시 받은 값 한 줄 (예: "SPY c=679.46")
+
+## 제약
+- 본문·인사말·설명·이모지 금지. JSON 객체 하나만.
+- 응답 전체 300단어 이하.
+- 30초 이내 완료.
+- 테스트 호출 응답 전체를 붙여넣지 말 것.
+```
+
+### 🧙 Setup Wizard (메인 세션)
+
+preflight이 `overall: "needs_setup"`을 반환하면 **메인 세션의 Claude 자신**이 다음 절차를 수행합니다. 사용자와 직접 대화하므로 subagent가 아닌 메인 orchestrator가 실행합니다.
+
+#### 1단계. 상황 설명 (짧게)
+> "이 플러그인은 3개의 무료 API 키가 필요합니다. 현재 {N}개가 미설정 상태라 자동 설정을 도와드릴게요. 각 키는 모두 무료 발급 가능합니다."
+
+`{N}`은 preflight JSON의 `checks` 중 `status != "ok"`인 항목 수. 어느 MCP가 실패했는지도 한 줄로 명시.
+
+#### 2단계. 누락된 키만 순차 수집
+`AskUserQuestion` 도구를 **실패한 MCP에 대해서만** 1개씩 순차 호출 (하나씩이어야 사용자가 키를 복사해 붙여넣기 편함):
+
+- **finnhub** (status != "ok"일 때만):
+  > "Finnhub API 키를 입력해주세요. 무료 발급: https://finnhub.io/register (가입 → Dashboard에서 키 복사, 보통 40자 영숫자)"
+
+- **alphavantage** (status != "ok"일 때만):
+  > "Alpha Vantage API 키를 입력해주세요. 무료 발급: https://www.alphavantage.co/support/#api-key (16자 대문자·숫자)"
+
+- **tavily** (status != "ok"일 때만):
+  > "Tavily API 키를 입력해주세요. 무료 발급: https://tavily.com (가입 → API Keys 메뉴, `tvly-`로 시작)"
+
+각 응답은 trim. 빈 문자열이거나 10자 미만이면 "키가 너무 짧습니다. 다시 확인해 입력해주세요"로 한 번 재요청. 2번째도 실패면 Wizard halt.
+
+#### 3단계. MCP 서버 등록 (Bash)
+각 MCP에 대해 **기존 등록이 있으면 먼저 remove 후 add** (기존 잘못된 키로 등록돼 있을 수 있으므로):
+
+```
+claude mcp remove finnhub 2>/dev/null
+claude mcp add finnhub -e FINNHUB_API_KEY="<입력받은 키>" -- npx -y @aigroup/finnhub-mcp
+
+claude mcp remove alphavantage 2>/dev/null
+claude mcp add alphavantage -e ALPHA_VANTAGE_API_KEY="<입력받은 키>" -- npx -y alpha-vantage-mcp
+
+claude mcp remove tavily 2>/dev/null
+claude mcp add tavily -e TAVILY_API_KEY="<입력받은 키>" -- npx -y tavily-mcp@latest
+```
+
+**보안**: 사용자 입력을 쉘 인자로 삽입할 때 반드시 쌍따옴표로 감싸고, 내부에 `"`나 `$`(가) 있으면 거부 + 재입력 요청.
+
+#### 4단계. 등록 결과 검증
+```
+claude mcp list 2>&1 | grep -E 'finnhub|alphavantage|tavily'
+```
+세 서비스가 모두 출력에 포함되는지 확인. 누락이 있으면 stderr를 사용자에게 그대로 보여주고 수동 편집 안내.
+
+#### 5단계. 사용자에게 완료 + 재시작 안내
+> "✅ MCP 서버 {등록_개수}개 등록 완료 (finnhub / alphavantage / tavily). **Claude Code를 한 번 재시작**한 뒤 다시 '미국주식 야간 보고서'라고 말씀해주시면 자동으로 리포트를 만들어드립니다."
+
+#### 6단계. halt
+이 호출에서는 **메인 워크플로우(Step 1~7)로 절대 진행하지 않습니다.** 재시작·재호출 후 다음 invocation의 preflight이 통과하면 그때 정상 워크플로우가 돌아갑니다.
+
+### 🛡 Fault tolerance
+
+- **preflight subagent 실패/빈 응답** → 메인 세션이 직접 `ToolSearch("select:mcp__finnhub__finnhub_stock_market_data,mcp__alphavantage__get_forex_rate,mcp__tavily__tavily_search")`를 시도해 스키마가 모두 확보되는지 확인. 실패 시 needs_setup으로 간주하고 Setup Wizard 실행
+- **사용자가 키 입력 거부/취소** → Wizard halt, "나중에 필요하면 다시 호출해주세요"로 마무리
+- **`claude mcp add` 실패** → stdout/stderr를 사용자에게 그대로 보여주고 수동 명령 복사·실행 안내
+- **`claude` CLI가 PATH에 없음** → 드문 케이스. 에러 메시지에서 감지되면 `~/.claude.json`의 `mcpServers` 블록에 직접 추가하는 JSON 스니펫을 출력
 
 ## 데이터 소스 역할 분담 (중요)
 

@@ -18,63 +18,50 @@
 
 ---
 
-## 📋 사전 준비 — API 키 3종 발급 (모두 무료 플랜 가능)
+## 🚀 설치 (README 읽을 필요 없음)
 
-이 플러그인은 세 개의 MCP 서버를 사용하며, 각각 무료 API 키가 필요합니다.
+> **이 섹션은 플러그인이 어떻게 동작하는지 궁금할 때만 보세요.** 실제 설치는 아래 두 명령만 실행하면 끝납니다 — 키 발급·환경변수 설정 같은 사전작업이 **전혀 필요 없습니다**.
 
-### 1. Finnhub (주력 시세 소스) — **필수**
-- 가입: https://finnhub.io/register
-- 무료 플랜: 분당 60 호출, 실시간 미국 주식·ETF 시세
-- 이 플러그인은 한 번 실행 시 30~34개 종목을 병렬 호출하므로 무료 플랜으로 충분
+### ⚡ 한 번만 하면 되는 설치 + 첫 실행
 
-### 2. Alpha Vantage (환율) — **필수**
-- 가입: https://www.alphavantage.co/support/#api-key
-- 무료 플랜: **하루 25회 제한**
-- 이 플러그인은 USD/KRW, USD/JPY 두 건만 호출하므로 하루 10회 실행해도 여유
-
-### 3. Tavily (뉴스·매크로 리서치) — **필수**
-- 가입: https://tavily.com
-- 무료 크레딧으로 시작 가능 (월 1,000 credits 정도)
-- `tavily_search` + `tavily_extract`를 서브에이전트에서 사용
-
-### 환경변수 설정
-발급받은 키를 셸 프로필(`~/.zshrc` 또는 `~/.bashrc`)에 등록:
-
-```bash
-export FINNHUB_API_KEY="your-finnhub-key-here"
-export ALPHA_VANTAGE_API_KEY="your-alpha-vantage-key-here"
-export TAVILY_API_KEY="tvly-dev-your-tavily-key-here"
-```
-
-설정 후 새 셸을 열거나 `source ~/.zshrc`로 적용하세요.
-
----
-
-## 🚀 설치
-
-### 옵션 A — `/plugin` 명령으로 설치 (권장)
-
-이 플러그인은 [`today8934/wooksang-marketplace`](https://github.com/today8934/wooksang-marketplace)에 인덱싱돼 있습니다. Claude Code 세션에서 다음 두 명령만 실행하세요:
-
+**1. 플러그인 설치** (Claude Code 세션에서):
 ```
 /plugin marketplace add today8934/wooksang-marketplace
 /plugin install overnight-market-report-plugin@wooksang-marketplace
 ```
 
-- 첫 번째 명령이 `wooksang-marketplace`를 등록 (여러 플러그인이 인덱싱된 마켓플레이스 인덱스)
-- 두 번째 명령이 이 `overnight-market-report-plugin`을 설치
-- 설치 후 Claude Code를 재시작하면 MCP 서버(finnhub·alphavantage·tavily)가 자동 로드됨
-- `/mcp`로 세 서버 모두 `✓ Connected` 상태인지 확인
+**2. 바로 호출**:
+```
+미국주식 야간 보고서 뽑아줘
+```
 
-### 옵션 B — 로컬 clone 후 개발/테스트
+**3. 자동 설정 마법사(Setup Wizard)가 뜨고** 다음과 같이 진행됩니다:
+- 플러그인이 내부적으로 `preflight-check` 서브에이전트를 돌려 finnhub·alphavantage·tavily 3개 MCP 상태를 확인
+- 미설정 상태면 Claude가 누락된 키를 **한 개씩 순차로 요청**합니다 (각 키마다 무료 발급 링크도 함께 안내)
+- 사용자는 링크 타고 가서 무료 가입 → 키 복사 → 대화창에 붙여넣기
+- 플러그인이 `claude mcp add` CLI로 자동 등록
+- "Claude Code를 재시작해주세요" 안내 → 재시작 → 다시 `미국주식 야간 보고서` 호출 → 이번엔 바로 리포트 생성
 
+**두 번째 호출부터는** 이미 키가 등록돼 있으므로 preflight이 바로 통과하고 리포트가 즉시 생성됩니다. 마법사는 다시 뜨지 않습니다.
+
+### 🔑 사용되는 3개 API (모두 무료 플랜)
+마법사가 직접 안내하지만 참고용:
+| 서비스 | 용도 | 가입 | 무료 한도 |
+|---|---|---|---|
+| [Finnhub](https://finnhub.io/register) | 주식 시세 (주력) | 이메일만 | 분당 60 호출 |
+| [Alpha Vantage](https://www.alphavantage.co/support/#api-key) | 환율 | 이메일만 | 하루 25 호출 |
+| [Tavily](https://tavily.com) | 뉴스·매크로 리서치 | 이메일만 | 월 1,000 credits |
+
+### 🧑‍💻 개발/테스트용 로컬 설치 (기여자 전용)
+
+플러그인 자체를 수정하거나 테스트하려면:
 ```bash
 git clone https://github.com/today8934/overnight-market-report-plugin.git
 cd overnight-market-report-plugin
 claude --plugin-dir .
 ```
 
-로컬에서 스킬이나 프롬프트를 수정해보면서 즉시 테스트할 때 사용합니다.
+일반 사용자는 위의 `/plugin marketplace add` 방식을 사용하세요.
 
 ---
 
@@ -178,24 +165,30 @@ Claude는 다음 단계를 순차/병렬로 수행합니다:
 
 ## 🛠 문제 해결
 
-### MCP 서버가 연결되지 않을 때
+### MCP 서버가 연결되지 않거나 401 에러가 날 때
+**가장 쉬운 방법**: 아무 트리거("미국주식 야간 보고서")로 호출하면 Setup Wizard가 자동으로 재실행되어 키를 다시 받아 등록합니다.
+
+**수동 확인·재등록**:
 ```bash
 # 상태 확인
 claude mcp list
 
 # 특정 서버 재등록 (예: tavily)
 claude mcp remove tavily
-claude mcp add tavily -e TAVILY_API_KEY=your-key -- npx -y tavily-mcp@latest
+claude mcp add tavily -e TAVILY_API_KEY=<your-key> -- npx -y tavily-mcp@latest
 ```
 
 ### `tavily_search`, `tavily_extract`가 도구 목록에 없을 때
-Tavily MCP가 로드는 됐지만 deferred tool로 등록된 경우입니다. Claude는 `ToolSearch("select:mcp__tavily__tavily_search,mcp__tavily__tavily_extract")`로 자동 로드합니다.
+Tavily MCP가 로드는 됐지만 deferred tool로 등록된 경우입니다. Claude는 `ToolSearch("select:mcp__tavily__tavily_search,mcp__tavily__tavily_extract")`로 자동 로드합니다. 사용자 조치 불필요.
 
 ### finnhub 특정 티커에서 "CFD subscription required" 에러
 해외 지수 심볼(`^N225`, `^FTSE` 등)은 무료 플랜 제한입니다. 스킬이 **자동으로 ETF 프록시(EWJ, EWU 등)로 우회**하므로 사용자 조치는 불필요.
 
 ### Alpha Vantage 25/day 제한 도달
 이 플러그인은 환율 2건만 호출하므로 하루 10회 이상 실행해야 도달합니다. 제한에 걸리면 해당 리포트의 USD/JPY 등이 `N/A`로 표시되지만 전체 리포트는 정상 완성됩니다.
+
+### Setup Wizard를 다시 보고 싶을 때 (키 교체 등)
+`claude mcp remove finnhub` (또는 `alphavantage` / `tavily`) 로 등록을 먼저 지우고 플러그인을 재호출하면 preflight이 `needs_setup`을 반환하여 Wizard가 다시 실행됩니다.
 
 ---
 
