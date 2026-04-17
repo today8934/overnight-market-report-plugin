@@ -9,244 +9,99 @@ description: 간밤 미국 증시(지수·섹터·주요 종목)와 국제정세
 
 ## 왜 이 skill이 필요한가
 
-한국 투자자는 개장 전에 미국 증시 마감 결과만이 아니라 **왜 그렇게 움직였는지**를 알고 싶어합니다. 단순 숫자 나열은 쓸모가 제한적이고, 지수 → 섹터 → 주요 종목 → 매크로/지정학 이벤트의 인과를 연결해야 실전에 쓸 수 있는 브리핑이 됩니다. 여러 데이터 소스를 한 번에 묶어 자동화합니다.
+한국 투자자는 개장 전에 미국 증시 마감 결과만이 아니라 **왜 그렇게 움직였는지**를 알고 싶어합니다. 지수 → 섹터 → 주요 종목 → 매크로/지정학 이벤트의 인과를 연결해야 실전에 쓸 수 있는 브리핑이 됩니다.
+
+## 참조 문서 (Progressive disclosure)
+
+자세한 내용은 필요할 때만 `Read`로 로드하세요. 메인 세션 context를 아끼기 위한 분할입니다.
+
+- `references/setup-wizard.md` — preflight-check subagent 프롬프트 + Setup Wizard 6단계 + **preflight 24h 캐싱 규칙**
+- `references/data-sources.md` — MCP 도구별 ✅/⚠️/❌ 매트릭스 + Tavily 미로드 시 WebSearch 쿼리 쌍
+- `references/theme-tickers.md` — **3-Tier 티커 유니버스** (Always-on / 테마 트리거 / 이벤트 트리거)
+- `references/glossary.md` — readability-pass 전용 용어 사전
 
 ## 출력 위치
 
 `~/workspace/overnight-market-report/YYYY-MM-DD.md` (오늘 한국 날짜 기준)
 
-디렉토리가 없으면 먼저 생성합니다. 같은 날짜 파일이 이미 존재하면 덮어쓰지 말고 `YYYY-MM-DD-HHMM.md` 형태로 시간 suffix를 붙여 새 파일을 만드세요 — 장중에 다시 돌려도 이전 브리핑을 잃지 않기 위함입니다.
+디렉토리가 없으면 먼저 생성합니다. 같은 날짜 파일이 이미 존재하면 덮어쓰지 말고 `YYYY-MM-DD-HHMM.md` 형태로 시간 suffix를 붙여 새 파일을 만드세요.
 
 ## 실행 순서
 
-0. **Preflight check (매 실행 가장 먼저, 무조건)** — `Agent` tool로 `preflight-check` subagent를 1회 실행해 finnhub·alphavantage·tavily 세 MCP 서버가 정상 동작하는지 확인
-   - 반환 JSON의 `overall == "ready"` → Step 1로 진행
-   - `overall == "needs_setup"` → **메인 워크플로우(Step 1~7) 진행 즉시 중단**하고 메인 세션에서 **Setup Wizard** 실행 후 사용자에게 재시작 안내하고 halt
-   - 자세한 프롬프트와 Wizard 절차는 아래 **"Preflight & Setup Wizard"** 섹션 참조
-1. 오늘 한국 날짜·시각(KST) 확인 → 파일 경로 결정
-2. 출력 디렉토리 확인/생성
+0. **Preflight (캐시 우선)** — `~/.claude/data/overnight-market-report/preflight.json`을 읽어 `last_ok_at`이 24h 이내 + 모든 checks가 `"ok"`면 **skip**하고 Step 1로. 캐시 miss / TTL 초과 / 지난 실행에서 401 감지 시 `references/setup-wizard.md`를 Read해 full preflight 실행. `needs_setup` 반환 시 Setup Wizard 진행 후 halt (메인 워크플로우 진입 금지).
+1. **오늘 한국 날짜·시각(KST) 확인 + 기준 세션 결정** (아래 "기준 세션 결정 로직" 참조) → 파일 경로 결정
+2. **출력 디렉토리 확인/생성** + 직전 파일 Read (전일 diff 섹션 재료 확보)
 3. **한 메시지에서 병렬 실행** (하이브리드 오케스트레이션):
-   - 시세 MCP 호출 × 20~34 (finnhub get_quote, 직접)
-   - 환율 MCP × 2 (alphavantage, 직접)
-   - 보조 WebSearch 1~3 (VIX/10Y 등, 직접)
+   - Tier 1 시세 MCP 호출 × 43 (finnhub `get_quote`) — `references/theme-tickers.md`의 Tier 1 리스트
+   - 환율 MCP × 2 (alphavantage USD/KRW, USD/JPY)
+   - 보조 WebSearch 1~3 (VIX/10Y 등 지수 수치 보완)
    - **`Agent` tool로 news-harvester subagent 1회** (뉴스 수집 위임)
-4. subagent 응답(압축 요약)을 받으면 시세 데이터와 종합하여 인과 분석
-5. 템플릿에 채워 md 파일 작성 — **데이터 품질 & 소스 섹션은 반드시 리포트 말미**. TL;DR이 최상단. (자세한 순서는 "보고서 템플릿" 섹션 참조)
-6. **`Agent` tool로 readability-pass subagent 1회** (순차 실행, 원본 저장 완료 후) — 완성된 리포트를 입력받아 주식 입문자용 `-쉬운버전.md`를 같은 디렉토리에 생성. 자세한 프롬프트는 "Readability-pass subagent" 섹션 참조
-7. 사용자에게 **원본 + 쉬운버전 두 저장 경로 + TL;DR**만 짧게 보고 — 본문 전체를 채팅에 다시 붙여넣지 마세요
+4. **Tier 2/3 조건부 2차 배치** — news-harvester 응답 수령 후 카테고리 키워드를 `references/theme-tickers.md` Tier 2/3 매핑과 substring 매칭해 매칭된 테마의 티커를 **2차 finnhub 병렬 호출** (최대 15개 cap, Tier 1 중복은 제외).
+5. **Sanity check 게이트** (아래 "Sanity check" 참조) — 통과 시 Step 6, 실패 시 리포트 상단에 경고 배너를 추가한 뒤 계속.
+6. **보고서 작성·저장** — 아래 "보고서 템플릿" 구조 그대로. YAML frontmatter → TL;DR → 3대 지수 → 섹터 → 주요 종목 → 테마별 트리거 종목(Tier 2/3이 활성화된 경우만) → 원자재/금리/환율 → 글로벌 → 국제정세 → 한국장 관전 포인트 → 전일 대비 변화 → 면책 → 데이터 품질 & 소스(말미). 인과 주장에는 inline `[[n]](url)` 출처 링크 필수.
+7. **Preflight 캐시 갱신** — 전체 실행이 문제없이 완료되면 `preflight.json`의 `last_ok_at`을 현재 KST ISO8601로 갱신.
+8. **`Agent` tool로 readability-pass subagent 1회** (순차 실행) — 완성된 리포트를 입력받아 `-쉬운버전.md` 생성. 자세한 프롬프트는 아래 "Readability-pass subagent" 섹션 참조.
+9. 사용자에게 **원본 + 쉬운버전 저장 경로 + TL;DR**만 짧게 보고 — 본문 전체를 채팅에 다시 붙여넣지 마세요.
 
-## Preflight & Setup Wizard
+## 기준 세션 결정 로직
 
-처음 설치한 사용자가 **README를 전혀 읽지 않고도** 즉시 사용할 수 있도록, 매 실행 전에 3개 MCP 서버의 상태를 자동 확인하고 필요 시 API 키 설정을 대화형으로 안내합니다. 이 플러그인은 `.mcp.json`을 포함하지 않으므로(치환 이슈 회피), MCP 등록은 **사용자별 `claude mcp add` CLI 호출**로 이뤄집니다.
+**"기준 세션"** = 보고서가 분석 대상으로 삼는 **직전 NY 정규장 마감일**. 한국 시각 기준 판정:
 
-### 🔎 preflight-check subagent
+| 한국 요일 (실행 시점) | 기준 세션 |
+|---|---|
+| 화~금 아침 | 전날 (월~목) NY 마감 |
+| 토요일 전일 | 금요일 NY 마감 |
+| 일요일 | 금요일 NY 마감 (주말 미장은 휴장) |
+| 월요일 아침 | 금요일 NY 마감 |
 
-`Agent` tool (`subagent_type: general-purpose`)로 아래 프롬프트를 전달. 응답은 30초 이내 **JSON 하나만** 반환하도록 엄격 제약.
+### US 주요 공휴일 (NY 정규장 휴장)
+- New Year's Day, MLK Day(1월 셋째 월), Presidents Day(2월 셋째 월), Good Friday, Memorial Day(5월 마지막 월), Juneteenth(6/19), Independence Day(7/4), Labor Day(9월 첫째 월), Thanksgiving(11월 넷째 목) + 다음날 조기 폐장, Christmas Day
+- 반일장: Black Friday, 12/24
 
-```
-역할: overnight-market-report-plugin이 사용하는 3개 MCP 서버의 정상 동작 여부를 확인하는 preflight checker. 오직 상태 판정과 JSON 반환만 수행.
-
-## 검증 대상
-1. `mcp__finnhub__finnhub_stock_market_data` — 미국 주식 시세
-2. `mcp__alphavantage__get_forex_rate` — 환율
-3. `mcp__tavily__tavily_search` — 뉴스 검색
-
-## 절차
-1. ToolSearch로 세 도구 스키마를 한 번에 로드 시도:
-   ToolSearch(query="select:mcp__finnhub__finnhub_stock_market_data,mcp__alphavantage__get_forex_rate,mcp__tavily__tavily_search", max_results=5)
-
-2. 로드에 성공한 도구들을 **한 메시지에서 병렬**로 테스트 호출:
-   - finnhub: operation="get_quote", symbol="SPY"
-   - alphavantage: from_currency="USD", to_currency="KRW"
-   - tavily: query="test", max_results=5
-
-3. 각 결과를 아래 분류로 판정:
-   - **ok**: 유효 JSON + 실제 데이터 (finnhub의 `c` 필드 > 0, alphavantage의 `Realtime Currency Exchange Rate` 키 존재, tavily의 `results` 배열 길이 > 0)
-   - **not_loaded**: ToolSearch가 해당 도구 스키마를 반환하지 않음 (MCP 서버 자체가 미등록)
-   - **auth_error**: 응답 본문에 "401" / "invalid" / "unauthorized" / "api key" / "authentication" 같은 단어가 포함된 에러
-   - **other_error**: 기타 실패 (네트워크, 레이트리밋, 스키마 불일치 등)
-
-4. 아래 형식으로만 반환 (**JSON 객체 하나만**, 다른 텍스트 일절 금지):
-
-{
-  "overall": "ready" 또는 "needs_setup",
-  "checks": {
-    "finnhub":      { "status": "<ok|not_loaded|auth_error|other_error>", "detail": "한 줄 요약" },
-    "alphavantage": { "status": "<ok|not_loaded|auth_error|other_error>", "detail": "한 줄 요약" },
-    "tavily":       { "status": "<ok|not_loaded|auth_error|other_error>", "detail": "한 줄 요약" }
-  }
-}
-
-- `overall`은 세 status가 모두 `ok`면 `"ready"`, 그 외엔 `"needs_setup"`
-- `detail`은 실패 시 에러 메시지 첫 100자 이하 요약, 성공 시 받은 값 한 줄 (예: "SPY c=679.46")
-
-## 제약
-- 본문·인사말·설명·이모지 금지. JSON 객체 하나만.
-- 응답 전체 300단어 이하.
-- 30초 이내 완료.
-- 테스트 호출 응답 전체를 붙여넣지 말 것.
-```
-
-### 🧙 Setup Wizard (메인 세션)
-
-preflight이 `overall: "needs_setup"`을 반환하면 **메인 세션의 Claude 자신**이 다음 절차를 수행합니다. 사용자와 직접 대화하므로 subagent가 아닌 메인 orchestrator가 실행합니다.
-
-#### 1단계. 상황 설명 (짧게)
-> "이 플러그인은 3개의 무료 API 키가 필요합니다. 현재 {N}개가 미설정 상태라 자동 설정을 도와드릴게요. 각 키는 모두 무료 발급 가능합니다."
-
-`{N}`은 preflight JSON의 `checks` 중 `status != "ok"`인 항목 수. 어느 MCP가 실패했는지도 한 줄로 명시.
-
-#### 2단계. 누락된 키만 순차 수집
-`AskUserQuestion` 도구를 **실패한 MCP에 대해서만** 1개씩 순차 호출 (하나씩이어야 사용자가 키를 복사해 붙여넣기 편함):
-
-- **finnhub** (status != "ok"일 때만):
-  > "Finnhub API 키를 입력해주세요. 무료 발급: https://finnhub.io/register (가입 → Dashboard에서 키 복사, 보통 40자 영숫자)"
-
-- **alphavantage** (status != "ok"일 때만):
-  > "Alpha Vantage API 키를 입력해주세요. 무료 발급: https://www.alphavantage.co/support/#api-key (16자 대문자·숫자)"
-
-- **tavily** (status != "ok"일 때만):
-  > "Tavily API 키를 입력해주세요. 무료 발급: https://tavily.com (가입 → API Keys 메뉴, `tvly-`로 시작)"
-
-각 응답은 trim. 빈 문자열이거나 10자 미만이면 "키가 너무 짧습니다. 다시 확인해 입력해주세요"로 한 번 재요청. 2번째도 실패면 Wizard halt.
-
-#### 3단계. MCP 서버 등록 (Bash)
-각 MCP에 대해 **기존 등록이 있으면 먼저 remove 후 add** (기존 잘못된 키로 등록돼 있을 수 있으므로):
-
-```
-claude mcp remove finnhub 2>/dev/null
-claude mcp add finnhub -e FINNHUB_API_KEY="<입력받은 키>" -- npx -y @aigroup/finnhub-mcp
-
-claude mcp remove alphavantage 2>/dev/null
-claude mcp add alphavantage -e ALPHA_VANTAGE_API_KEY="<입력받은 키>" -- npx -y alpha-vantage-mcp
-
-claude mcp remove tavily 2>/dev/null
-claude mcp add tavily -e TAVILY_API_KEY="<입력받은 키>" -- npx -y tavily-mcp@latest
-```
-
-**보안**: 사용자 입력을 쉘 인자로 삽입할 때 반드시 쌍따옴표로 감싸고, 내부에 `"`나 `$`(가) 있으면 거부 + 재입력 요청.
-
-#### 4단계. 등록 결과 검증
-```
-claude mcp list 2>&1 | grep -E 'finnhub|alphavantage|tavily'
-```
-세 서비스가 모두 출력에 포함되는지 확인. 누락이 있으면 stderr를 사용자에게 그대로 보여주고 수동 편집 안내.
-
-#### 5단계. 사용자에게 완료 + 재시작 안내
-> "✅ MCP 서버 {등록_개수}개 등록 완료 (finnhub / alphavantage / tavily). **Claude Code를 한 번 재시작**한 뒤 다시 '미국주식 야간 보고서'라고 말씀해주시면 자동으로 리포트를 만들어드립니다."
-
-#### 6단계. halt
-이 호출에서는 **메인 워크플로우(Step 1~7)로 절대 진행하지 않습니다.** 재시작·재호출 후 다음 invocation의 preflight이 통과하면 그때 정상 워크플로우가 돌아갑니다.
-
-### 🛡 Fault tolerance
-
-- **preflight subagent 실패/빈 응답** → 메인 세션이 직접 `ToolSearch("select:mcp__finnhub__finnhub_stock_market_data,mcp__alphavantage__get_forex_rate,mcp__tavily__tavily_search")`를 시도해 스키마가 모두 확보되는지 확인. 실패 시 needs_setup으로 간주하고 Setup Wizard 실행
-- **사용자가 키 입력 거부/취소** → Wizard halt, "나중에 필요하면 다시 호출해주세요"로 마무리
-- **`claude mcp add` 실패** → stdout/stderr를 사용자에게 그대로 보여주고 수동 명령 복사·실행 안내
-- **`claude` CLI가 PATH에 없음** → 드문 케이스. 에러 메시지에서 감지되면 `~/.claude.json`의 `mcpServers` 블록에 직접 추가하는 JSON 스니펫을 출력
-
-## 데이터 소스 역할 분담 (중요)
-
-**실제 검증된 결과**에 기반한 역할 분담입니다. 각 소스의 강점을 살려 조합하세요.
-
-### 📊 시세(숫자) = MCP를 주력으로 사용
-**원칙: 가격/변동률은 반드시 MCP에서 가져온다. 뉴스 기사에서 숫자를 긁어오는 건 마지막 수단이다.** 실제 테스트에서 뉴스 기사의 종가와 MCP 실시간 데이터가 달랐던 사례가 있었습니다 — MCP가 진실입니다.
-
-#### 🥇 `mcp__finnhub__finnhub_stock_market_data` (operation=`get_quote`) — **주력**
-✅ 검증 완료 (Iteration 2 테스트): SPY, QQQ, DIA, IWM, XLK, XLE, XLV, USO, GLD, UUP, NVDA, AAPL, TSLA, MSFT 등 **모든 US-listed ETF/Stock 작동**.
-
-응답 필드:
-- `c` = current price (종가)
-- `d` = change (변동)
-- `dp` = change percent (변동률 %)
-- `h` = day high, `l` = day low, `o` = day open, `pc` = previous close
-
-#### 🥈 `mcp__alphavantage__get_forex_rate` — 환율 전용
-✅ 검증 완료. USD/KRW, USD/JPY 등 환율. 무제한.
-
-#### ⚠️ `mcp__alphavantage__get_stock_price` — 백업
-작동하지만 **무료 티어 하루 25회 제한**. finnhub이 실패한 특정 티커에만 선별적으로 사용.
-
-#### ❌ `mcp__yfinance__getStockAnalysis` — 사용 금지
-현재 환경에서 모든 티커를 `¥0 / 데이터 없음`으로 반환. 호출 자체가 시간 낭비. **절대 쓰지 마세요**.
-
-#### ❌ finnhub `^VIX`, `^TNX` 등 지수 심볼
-"CFD subscription required" 에러. 지수 심볼 대신 **ETF 프록시** 또는 **WebSearch**로 우회.
-
-### 📰 뉴스·매크로 = Tavily + WebSearch **반드시 병렬로**
-이 skill은 **Tavily MCP를 설치 전제**로 설계되어 있습니다. Tavily와 WebSearch는 서로를 대체하는 것이 아니라 **교차검증용으로 함께 사용**합니다. Tavily는 금융 뉴스 원문 추출(extract)에 특화되어 있어 WebSearch가 놓치는 원문 세부 정보를 보완합니다.
-
-#### 🥇 Tavily MCP — **필수 도구**
-- 도구 이름: `tavily_search`, `tavily_extract` (정확한 이름은 세션 시작 시 `ToolSearch`의 `select:tavily_search,tavily_extract` 또는 `query: "tavily"` 로 확인)
-- 사용법:
-  - `tavily_search`: 여러 쿼리를 병렬 호출해 금융 뉴스·매크로·지정학 정보 수집
-  - `tavily_extract`: 핵심 기사 URL을 통째로 원문 추출 (WebSearch 스니펫보다 정확)
-- **반드시 WebSearch와 같은 메시지 안에서 병렬 호출**해 교차검증
-
-#### 🥇 `WebSearch` — **필수 도구**
-매크로 이벤트, 지정학, 경제지표 발표, 기업 실적 서프라이즈 등 뉴스성 정보의 기본 소스. Tavily와 병렬로 실행.
-
-**⚠️ 쿼리 작성 규칙**: WebSearch는 연/월을 명시하지 않으면 과거 자료를 반환할 수 있음. **모든 쿼리에 현재 연/월 포함**.
-
-#### Tavily가 세션에 로드되지 않은 경우
-`ToolSearch`로 `tavily_search`를 찾을 수 없으면 Tavily MCP가 이 세션에서 아직 활성화되지 않았다는 뜻입니다 (설치 직후 Claude Code 재시작 전일 수 있음). 이 경우:
-1. 사용자에게 "Tavily MCP가 이 세션에 로드되지 않아 WebSearch만으로 뉴스를 수집합니다"라고 고지
-2. WebSearch 쿼리를 평소보다 **2배 더 다양한 각도**로 실행해 Tavily 부재를 보완
-3. 보고서 상단 "데이터 품질"에 "Tavily 미로드" 명시
-
-#### ⚠️ `mcp__finnhub__finnhub_news_sentiment` — subagent 경유만
-응답이 75KB 초과로 컨텍스트 한도를 초과한 적 있음. 메인 context에 직접 호출 금지. 필요 시 `Agent` tool로 위임해 "Top 5 헤드라인 + 1줄 요약 + URL"만 받아오세요.
-
-#### ❌ `mcp__finnhub__finnhub_calendar_data`
-API key 이슈로 실패. 경제지표 캘린더는 WebSearch로 대체.
-
-### 일반 원칙
-- **실패 허용**: 어떤 도구가 실패해도 전체를 중단하지 말고 다른 소스로 대체. "데이터 품질" 섹션에 실패 내역 명시.
-- **병렬 원칙**: 독립적인 호출은 **반드시 한 메시지에 동시 실행**. 섹션당 10~20개 티커를 묶으면 전체 수집이 한 번에 끝납니다.
+### 판정 절차
+1. 후보 기준 세션 날짜(위 표)를 먼저 계산
+2. 그 날짜가 US 공휴일 체크리스트에 해당하면 **하루 더 앞당김** (재귀적으로 영업일 도달까지)
+3. 확실하지 않으면 news-harvester에 `"US stock market {Month} {D} {YYYY} closed holiday"` 쿼리 추가해 교차검증
+4. 결정된 기준 세션을 YAML frontmatter `session_date`에 기록
 
 ## 오케스트레이션 구조 (하이브리드)
 
-이 skill은 **메인 orchestrator + 뉴스 harvester subagent** 하이브리드 구조로 동작합니다. 모든 작업을 subagent에 분산시키면 오버헤드가 크고 cross-domain 인과 분석이 불가능해지므로, **맥락이 필요한 압축 데이터는 메인에서 직접 병렬 호출**하고 **대용량·비정형 뉴스 정보는 subagent로 격리**합니다.
+**메인 orchestrator + 뉴스 harvester subagent** 하이브리드. 응답이 작고 cross-domain 분석이 필요한 호출은 메인이 직접 병렬 처리하고, 대용량 뉴스는 subagent로 격리합니다.
 
-### 🧠 메인 Orchestrator가 직접 수행 (context에 남아야 분석 가능)
-- 날짜·경로 계산
-- 시세 MCP 병렬 호출 — `finnhub get_quote` × 20~34 티커 (지수 ETF, 섹터 ETF, Mag7, 원자재 ETF, 글로벌 ETF)
-- 환율 MCP — `alphavantage get_forex_rate` × 2 (USD/KRW, USD/JPY)
-- 짧은 매크로 `WebSearch` 1~3개 (VIX, 10Y 금리 같은 보조 수치)
+### 🧠 메인 Orchestrator가 직접 수행
+- 날짜·경로·기준 세션 계산
+- Tier 1 시세 MCP 병렬 호출 (`references/theme-tickers.md` Tier 1 리스트)
+- 환율 MCP (alphavantage `get_forex_rate` × 2)
+- 짧은 매크로 WebSearch 1~3개 (VIX, 10Y 금리 보완)
+- Tier 2/3 조건부 2차 배치
 - 최종 인과 분석 + 섹터↔원자재↔뉴스 cross-domain 연결
 - 보고서 작성·저장
 
-이유: 이 호출들은 응답이 작고(<1KB) 병렬로 가기 때문에 subagent 오버헤드가 더 큼. 또 **모든 데이터가 한 context에 있어야** 섹터 로테이션과 뉴스 헤드라인을 엮을 수 있음.
-
-### 🤖 Subagent(news-harvester)에 위임
+### 🤖 news-harvester subagent에 위임
 - `tavily_search` (여러 쿼리 동시)
 - `tavily_extract` (긴 기사 원문 추출)
 - `mcp__finnhub__finnhub_news_sentiment` (75KB+ 대용량 응답)
 - `WebSearch` (뉴스/매크로 교차검증)
-- 종목 급등락 원인 deep-dive 리서치
 
-이유: 이 호출들은 응답이 수십 KB급으로 커서 메인 context에 부으면 분석 품질이 급격히 떨어짐. Subagent는 원문을 다 읽고 **압축된 요약만 반환**하므로 메인 context는 깨끗하게 유지됨.
+### 🔧 News-harvester subagent 호출 프롬프트
 
-### 🔧 News-harvester subagent 호출 방법
-
-`Agent` tool로 subagent를 띄웁니다 (`subagent_type`은 `general-purpose`로 충분). 프롬프트 템플릿
+`Agent` tool (`subagent_type: general-purpose`)로 전달:
 
 ```
 역할: 오늘({YYYY-MM-DD})의 미국 증시·매크로·지정학 뉴스 harvester.
 기준 세션: {전일 NY 정규장 마감 날짜}.
 
-수집 단계:
-1. tavily_search (ToolSearch로 tavily_search 찾기 시도, 없으면 WebSearch만):
+수집 단계 (한 메시지에서 병렬 실행):
+1. tavily_search (없으면 WebSearch만):
    - "Federal Reserve FOMC rate decision {Month} {YYYY}"
    - "US stock market close {Month} {D} {YYYY} sector performance"
    - "CPI PCE jobs report {Month} {YYYY}"
    - "Middle East Iran Ukraine Taiwan {Month} {YYYY} market impact"
    - "earnings surprise {Month} {D} {YYYY}"
+   - "OPEC oil production {Month} {YYYY}"
 2. WebSearch로 동일 주제 교차검증 (각 쿼리에 현재 연/월 반드시 포함)
 3. (선택) mcp__finnhub__finnhub_news_sentiment로 센티먼트 확인 — 응답이 크면 주요 5개 헤드라인만 추출
 4. 핵심 기사 3~5개 URL은 tavily_extract로 원문 통째 추출해 주요 인용·숫자 확인
-
-위 호출들은 반드시 **한 메시지 안에서 병렬로** 실행하세요.
 
 반환 형식 (반드시 준수, 전체 응답 800단어 이하):
 
@@ -254,90 +109,60 @@ API key 이슈로 실패. 경제지표 캘린더는 WebSearch로 대체.
 - [1줄 요약 + URL] × 10
 
 ## 카테고리별 임팩트
+(각 bullet의 표현을 Tier 2/3 매핑에 쓸 것이므로 관련 키워드 원어 유지)
 - 연준/금리:
 - 인플레/경제지표:
 - 지정학/중동/우크라이나:
 - 기업 실적/가이던스:
-- 원자재/에너지:
+- 원자재/에너지 (OPEC 포함):
+- 중국/관세:
+- 크립토/리스크 심리:
+- AI/반도체/전력:
 
 ## 시장 방향성 추론
 - (2~3줄, 왜 이런 흐름인지)
 
 ## 주요 출처
-- (핵심 URL 5~10개)
+- (핵심 URL 5~10개, 번호 붙여 — 메인이 [[n]](url) inline 링크로 사용)
 
 중요: 원문을 직접 복붙하지 말고 반드시 요약. 응답 전체가 메인 context에 포함되므로 간결함이 핵심. 불확실한 인과는 "~로 보임"처럼 약하게 표현.
 ```
 
 ### 🛡 Fault tolerance
-news-harvester가 실패하거나 빈 응답을 반환하면, 메인 orchestrator가 **fallback으로 WebSearch 3~5개만 직접 실행**해 핵심 뉴스를 확보하고 "데이터 품질" 섹션에 `news-harvester 실패, WebSearch fallback`을 명시합니다. **시세 수집과 뉴스 수집이 독립적이므로 뉴스가 실패해도 리포트는 완성됩니다.**
+- news-harvester 실패 → 메인이 WebSearch 3~5개 직접 실행. 시세 리포트는 정상 완성 (fault isolation)
+- Tier 2/3 활성화 실패 → 무시하고 Tier 1만으로 작성 (데이터 품질에 한 줄 명시)
+- finnhub 일부 티커 실패 → 해당 티커만 `N/A`로 표시, 섹션 전체는 유지
 
-### 🎨 Readability-pass subagent (후처리, 순차 실행)
+### 🎨 Readability-pass subagent (순차 후처리)
 
-원본 리포트가 디스크에 저장된 **뒤에** 별도 subagent를 1회 실행해 같은 디렉토리에 `-쉬운버전.md` 파일을 생성합니다. 이 단계는 수집/분석 블록과 **독립**이며 원본이 완성된 뒤에만 돌기 때문에 병렬이 아니라 **순차 실행**입니다.
-
-**왜 필요한가**: 원본 리포트는 실전 트레이딩 관점에서 디버전스·섹터 로테이션·FedWatch 같은 전문용어가 많습니다. 주식을 처음 접하는 독자에게는 이 어휘 장벽이 진입을 막기 때문에, 같은 내용을 **주식 입문자가 이해할 수 있는 언어로 리라이팅한 별도 파일**을 남겨 독자가 용도에 따라 두 버전을 선택해 읽을 수 있게 합니다.
-
-**원본은 손대지 않음**: readability-pass는 원본 파일을 읽기만 하고 수정하지 않습니다. 전문가용 원본과 입문자용 쉬운버전이 **같은 디렉토리에 쌍으로** 공존합니다.
-
-**호출 방법**: `Agent` tool (`subagent_type: general-purpose`)로 아래 프롬프트를 전달. `{원본 절대경로}` 부분만 실제 경로로 치환.
+원본 리포트 저장 **뒤** 별도 subagent 1회 실행 — `-쉬운버전.md` 생성. `Agent` tool (`subagent_type: general-purpose`)로 아래 프롬프트 전달, `{원본 절대경로}`만 치환:
 
 ```
 역할: 완성된 야간 미국 증시 브리핑 보고서를 **주식 투자 입문자**가 이해할 수 있게 리라이팅하는 readability pass.
 
 ## 입력
 - 원본 리포트 절대경로: `{원본 절대경로}`
-- 출력 경로: 같은 디렉토리에 파일명 + `-쉬운버전.md` suffix (예: `2026-04-11-1210.md` → `2026-04-11-1210-쉬운버전.md`)
+- 용어집 절대경로: `{플러그인 SKILL.md와 같은 디렉토리}/references/glossary.md`
+- 출력 경로: 같은 디렉토리에 파일명 + `-쉬운버전.md` suffix
 
 ## 작업 절차
 1. Read 도구로 원본 리포트 전체를 읽는다.
-2. 아래 "작업 원칙"에 따라 입문자용으로 리라이팅한다.
-3. Write 도구로 `-쉬운버전.md`에 저장한다.
-4. 한 줄로 `쉬운버전 저장 완료: <절대경로>`만 반환. **본문을 다시 복사해 반환 금지.**
+2. Read 도구로 용어집(`references/glossary.md`)을 읽어 치환 사전으로 사용한다.
+3. 아래 "작업 원칙"에 따라 입문자용으로 리라이팅한다.
+4. Write 도구로 `-쉬운버전.md`에 저장한다.
+5. 한 줄로 `쉬운버전 저장 완료: <절대경로>`만 반환. **본문을 다시 복사해 반환 금지.**
 
 ## 작업 원칙 (엄수)
 
 ### 반드시 지킬 것
 1. **모든 숫자·티커·날짜는 원본 그대로 유지**. 종가, 변동률, 금리, 환율, 섹터 변동률 등 어떤 수치도 변경·추정·생략 금지. 원본이 진실.
-2. **구조(섹션 제목과 순서)는 원본과 동일**. TL;DR → 3대 지수 → 섹터 → 주요 종목 → 원자재/금리/환율 → 글로벌 → 국제정세 → 한국장 관전 포인트 → 데이터 품질 & 소스. 독자가 두 버전을 대조해 읽을 수 있어야 함.
+2. **구조(섹션 제목과 순서)는 원본과 동일**. TL;DR → 3대 지수 → 섹터 → 주요 종목 → 테마별 트리거(있으면) → 원자재/금리/환율 → 글로벌 → 국제정세 → 한국장 관전 포인트 → 전일 대비 변화 → 면책 → 데이터 품질 & 소스. 독자가 두 버전을 대조해 읽을 수 있어야 함.
 3. **인과 해석 결론은 보존**, 어휘만 쉬운 말로. 원본의 "왜"는 같아야 함.
-4. **URL과 출처 블록은 그대로 복사**.
+4. **URL과 출처 블록(`[[n]](url)` 포함)은 그대로 복사**.
+5. **YAML frontmatter는 그대로 복사**. 내용 변경 금지.
 
 ### 전문용어 처리 룰
-한 섹션에서 **처음 등장할 때 괄호 안에 짧은 해설**을 붙이고, 같은 섹션 안에서는 해설 없이 원어만 사용. 예:
-
-- 디버전스 → "디버전스(서로 다른 방향으로 움직이는 현상)"
-- 섹터 로테이션 → "섹터 로테이션(투자금이 업종 간에 이동하는 흐름)"
-- 방어주 → "방어주(경기와 무관하게 꾸준한 필수소비재·헬스케어·유틸리티 등)"
-- 경기민감주 → "경기민감주(경기 좋을 때 잘 오르는 산업재·소재·금융 등)"
-- CPI → "CPI(소비자물가지수 — 생활물가가 얼마나 올랐는지 보여주는 지표)"
-- 근원 CPI → "근원 CPI(에너지·식품을 제외한 물가지수, 추세 판단용)"
-- PCE → "PCE(개인소비지출물가지수 — 연준이 가장 중시하는 물가 지표)"
-- FOMC → "FOMC(연방공개시장위원회 — 미국 기준금리를 정하는 회의)"
-- CME FedWatch → "CME FedWatch(시장이 예상하는 금리 방향을 확률로 보여주는 지표)"
-- 10년물 국채금리 → "10년물 국채금리(미국 정부가 10년간 돈을 빌릴 때 내는 이자, 장기금리 기준)"
-- GDPNow → "GDPNow(애틀랜타 연준이 실시간 추정하는 성장률)"
-- VIX → "VIX(시장의 공포·변동성을 수치화한 지수, 20 아래면 안정적)"
-- ETF → "ETF(여러 종목을 묶어 주식처럼 거래하는 상품)"
-- 프록시 → "프록시(대리로 보는 지표)"
-- Mag7 / Magnificent 7 → "Mag7(빅테크 7인방: Apple·Microsoft·NVIDIA·Google·Amazon·Meta·Tesla)"
-- 밸류에이션 → "밸류에이션(주가가 기업가치 대비 비싼지 싼지 평가)"
-- NIM → "NIM(예대금리차 — 은행이 대출로 받는 이자와 예금으로 주는 이자의 차이)"
-- capex → "capex(설비투자)"
-- 차익실현 → "차익실현(오른 종목을 팔아 수익을 확정하는 행위)"
-- 테일리스크 → "테일리스크(가능성은 낮지만 터지면 충격이 큰 위험)"
-- 스태그플레이션 → "스태그플레이션(경기는 멈추고 물가만 오르는 상황)"
-- 헤드라인 쇼크 → "헤드라인 쇼크(표면 수치가 예상보다 나쁘게 나와 시장을 놀라게 하는 것)"
-- 호르무즈 해협 → "호르무즈 해협(세계 원유 수송의 약 20%가 지나가는 이란 인근 해협)"
-- HBM → "HBM(고대역폭 메모리, AI 가속기에 들어가는 고성능 D램)"
-- SaaS → "SaaS(구독형 소프트웨어 사업, 예: Salesforce, ServiceNow)"
-- 밸류체인 → "밸류체인(제품이 만들어지는 모든 연관 기업 사슬)"
-- 강보합 / 약보합 → "강보합(살짝 오른 채 마감)" / "약보합(살짝 내린 채 마감)"
-- 컨센서스 → "컨센서스(애널리스트들의 평균 예상치)"
-- 가이던스 → "가이던스(기업이 스스로 제시한 실적 전망)"
-- 다운그레이드 → "다운그레이드(투자의견 하향)"
-
-목록에 없는 전문용어가 나오면 같은 방식으로 한 번만 괄호 해설.
+한 섹션에서 **처음 등장할 때 괄호 안에 짧은 해설**을 붙이고, 같은 섹션 안에서는 해설 없이 원어만 사용. 해설 텍스트는 `references/glossary.md`에서 참조. 목록에 없는 전문용어가 나오면 같은 방식으로 한 번만 괄호 해설을 생성.
 
 ### 문장 스타일
 - "~임", "~됨" 같은 딱딱한 종결은 "~입니다"/"~했습니다"로
@@ -349,10 +174,10 @@ news-harvester가 실패하거나 빈 응답을 반환하면, 메인 orchestrato
 > Dow Jones(DIA)는 미국 전통 대기업 30곳을 묶은 지수입니다. 이 날 -0.55%로 3대 지수 중 가장 약했습니다.
 
 ### TL;DR은 특히 쉽게
-원본 TL;DR의 **한줄평(첫 줄 굵은 인용구)**과 세부 bullet 둘 다 유지. 한줄평은 원본의 의미는 보존하되 전문용어를 풀어 써서 주식 입문자도 한 번에 이해할 수 있게 리라이팅 (예: "CPI 쇼크" → "미국 물가가 예상보다 높게 나오고", "Fed 매파 선회" → "연준이 '금리 인하 없다'는 신호를 주면서"). bullet 부분은 원본을 기반으로 더 풀어써도 OK (최대 10줄). 가장 중요한 것: **오늘 미국 장이 왜 그렇게 움직였는지**가 초보에게도 한눈에 들어와야 함.
+원본 TL;DR의 **한줄평(첫 줄 굵은 인용구)**과 세부 bullet 둘 다 유지. 한줄평은 원본 의미는 보존하되 전문용어를 풀어 써서 주식 입문자도 한 번에 이해할 수 있게 리라이팅 (예: "CPI 쇼크" → "미국 물가가 예상보다 높게 나오고"). bullet은 원본 기반으로 더 풀어써도 OK (최대 10줄).
 
 ### 필수: 상단에 미니 용어집 (TL;DR 바로 위)
-파일 **최상단(헤더 메타 블록 바로 아래, TL;DR 직전)**에 `## 📘 이 리포트를 처음 보시나요? 미니 용어집` 섹션을 넣을 것. 본문에서 가장 중요한 5~10개 용어를 "용어명 — 한 줄 풀이" 형태로 정리해 독자가 본문을 읽기 전에 훑어볼 수 있게 합니다. 용어집이 있어야 TL;DR부터 바로 이해가 시작됨. 말미 배치는 금지 (원본 리포트 iteration 3에서 사용자 피드백으로 확정).
+파일 최상단(YAML frontmatter 바로 아래, TL;DR 직전)에 `## 📘 이 리포트를 처음 보시나요? 미니 용어집` 섹션을 넣을 것. 본문에서 가장 중요한 5~10개 용어를 "용어명 — 한 줄 풀이" 형태로 정리. 말미 배치 금지.
 
 ## 금지 사항
 - 숫자·티커 만들어내기 금지
@@ -360,107 +185,88 @@ news-harvester가 실패하거나 빈 응답을 반환하면, 메인 orchestrato
 - 섹션 삭제 또는 순서 변경 금지
 - URL 임의 변경 금지
 - 투자 조언 성격 문장 추가 금지 (원본의 면책 문구는 그대로 유지)
+- YAML frontmatter 변경 금지
 
 ## 반환
 파일을 쓴 뒤 **한 줄로만** `쉬운버전 저장 완료: <절대경로>` 형태로 반환. 본문 재출력 절대 금지.
 ```
 
-**Fault tolerance**: readability-pass가 실패해도 원본 리포트는 이미 저장돼 있으므로 전체를 중단하지 말고 "쉬운버전 생성 실패" 한 줄만 사용자에게 고지하세요.
+**Fault tolerance**: readability-pass 실패해도 원본은 저장 완료 상태. "쉬운버전 생성 실패" 한 줄만 고지.
 
-## 수집 블록별 권장 접근
+## Sanity check 게이트
 
-### 1) 미국 3대 지수 + 변동성 — ETF 프록시 사용
-**지수 심볼(^GSPC, ^IXIC, ^DJI)은 finnhub에서 막히므로 ETF로 우회**.
+Step 6(보고서 저장) **직전**에 자동 검증. 아래 조건 중 **하나라도 위반**이면 보고서 상단에 `> ⚠️ **데이터 품질 경고**: <위반 내역>. 숫자를 맹신하지 말고 데이터 품질 섹션 참조.` 배너를 추가한 뒤 저장 진행.
 
-| 지수 | ETF 프록시 | finnhub 도구 |
-|---|---|---|
-| S&P 500 | **SPY** | `get_quote` ✅ |
-| Nasdaq 100 | **QQQ** | `get_quote` ✅ |
-| Dow Jones | **DIA** | `get_quote` ✅ |
-| Russell 2000 | **IWM** | `get_quote` ✅ |
-| VIX | — | WebSearch 또는 `VIXY` ETF 프록시 |
+### 검증 규칙
+1. **지수 4개 (SPY/QQQ/DIA/IWM) 모두 `N/A`** → 시세 수집 전면 실패 가능성. 배너 표시 + 데이터 품질 섹션에 원인 명시.
+2. **개별 티커 변동률 `|dp| > 10%`** → 일반적인 일간 변동이 아님. 스플릿·배당락·데이터 오류 가능성. 배너에 해당 티커 명시.
+3. **환율 2건 모두 실패** → alphavantage 한도 또는 키 문제. 배너 표시.
+4. **news-harvester가 빈 응답 또는 오류 반환** → 배너 대신 데이터 품질 섹션에 "뉴스 수집 실패, WebSearch fallback 사용" 명시 (배너는 시세 이상에 한정).
 
-지수 포인트(6,816.89 같은 값)가 필요하면 WebSearch로 보완. ETF 종가/변동률만으로도 시장 방향성은 100% 파악 가능.
-
-### 2) 섹터 ETF — 전부 finnhub
-XLK(Tech), XLF(Financials), XLE(Energy), XLV(Healthcare), XLY(Consumer Discretionary), XLP(Staples), XLI(Industrials), XLU(Utilities), XLRE(Real Estate), XLB(Materials), XLC(Communication).
-
-**한 메시지에 11개 ETF를 finnhub `get_quote`로 병렬 호출**하고 `dp`(변동률)로 정렬 → 상위 3 / 하위 3 섹터 식별 → 왜 그 방향인지 원자재·금리·뉴스와 연결.
-
-### 3) 주요 종목 — 전부 finnhub
-기본: AAPL, MSFT, NVDA, GOOGL, AMZN, META, TSLA
-추가(선택): AMD, AVGO, TSM, NFLX
-
-한 메시지에 병렬 호출. 크게 움직인 종목은 WebSearch/Tavily로 `"{ticker} stock news {Month} {D} {YYYY}"` 추가 조사.
-
-### 4) 원자재 · 금리 · 환율
-| 항목 | 방법 |
-|---|---|
-| WTI 유가 | **USO** ETF → finnhub `get_quote` ✅ |
-| 금 | **GLD** ETF → finnhub `get_quote` ✅ |
-| 달러인덱스 | **UUP** ETF → finnhub `get_quote` ✅ |
-| 美 10년물 금리 | WebSearch (`"10 year treasury yield {Month} {D} {YYYY}"`) 또는 **IEF**/**TLT** ETF 프록시 |
-| USD/KRW | **`mcp__alphavantage__get_forex_rate`** ✅ (from=USD, to=KRW) |
-| USD/JPY | **`mcp__alphavantage__get_forex_rate`** ✅ (from=USD, to=JPY) |
-
-### 5) 글로벌 증시 — ETF 프록시 또는 WebSearch
-finnhub 무료 티어는 해외 지수 심볼(^N225 등)이 막힙니다. 방법:
-
-| 시장 | 방법 A (ETF 프록시, finnhub) | 방법 B (WebSearch) |
-|---|---|---|
-| 일본 Nikkei | **EWJ** | `"Nikkei 225 close {Month} {D} {YYYY}"` |
-| 영국 FTSE | **EWU** | `"FTSE 100 close {Month} {D} {YYYY}"` |
-| 독일 DAX | **EWG** | `"DAX close {Month} {D} {YYYY}"` |
-| 홍콩 HSI | **EWH** | `"Hang Seng close {Month} {D} {YYYY}"` |
-| 한국 KOSPI | **EWY** | `"KOSPI close {Month} {D} {YYYY}"` |
-
-ETF는 현지 증시 종가를 정확히 반영하진 않지만 방향성 신호로는 충분. 정확한 포인트가 필요하면 WebSearch 병행.
-
-### 6) 뉴스 · 이벤트 (매크로 + 지정학) — **subagent 위임**
-
-이 블록은 메인 orchestrator가 직접 처리하지 **않습니다**. 대신 **"오케스트레이션 구조" 섹션의 news-harvester subagent 템플릿**을 사용해 `Agent` tool로 위임하세요. 이유:
-
-- Tavily extract, finnhub news_sentiment 같은 대용량 응답을 메인 context에 쏟지 않음
-- 메인은 압축된 "Top 10 헤드라인 + 카테고리별 임팩트" 요약만 받음
-- 뉴스 수집이 실패해도 시세 기반 리포트는 정상 완성 (fault isolation)
-
-실행 타이밍: 시세 수집 블록(1~5)과 **동시에** subagent를 띄우세요. 즉 **한 메시지 안에서 finnhub 시세 호출 ×20~30 + Agent(news-harvester) 1개를 병렬** 실행하면, 리포트 작성 단계에 진입할 때 시세와 뉴스가 모두 준비되어 있습니다.
-
-subagent가 빈 응답이나 오류를 내면 메인 orchestrator가 `WebSearch` 3~5개로 fallback하세요. 쿼리 예시는 news-harvester 템플릿과 동일합니다.
+**위반 없음** → 배너 생략, 통상 저장.
 
 ## 분석: 인과 연결
 
-데이터를 모았다면 **"왜"**를 써야 합니다. 단순 나열과 분석의 차이는 인과입니다.
+데이터를 모았다면 **"왜"**를 써야 합니다.
 
 - ❌ "XLE -0.68%"
-- ✅ "XLE -0.68% — USO(WTI) -1.69%와 연동. 이란 휴전 기대 뉴스가 유가 차익실현을 유발"
+- ✅ "XLE -0.68% — USO(WTI) -1.69%와 연동. 이란 휴전 기대 뉴스가 유가 차익실현을 유발 [[3]](https://...)"
 
-체크리스트:
+### 출처 링크 규칙 (v0.3.0~)
+**모든 인과 주장**(해석/로테이션 분석/트리거 셀)에는 news-harvester의 "주요 출처" 번호를 `[[n]](url)` inline 링크로 부착. 링크가 없는 인과는 **추론**으로만 표기 ("~로 보임"). TL;DR 한줄평은 면제, 본문 인과는 강제.
+
+### 섹터 로테이션 자동 라벨
+11개 섹터 변동률을 수집한 뒤 아래 룰로 라벨을 1개 선택해 "섹터 동향" 섹션 최상단에 표기:
+
+| 라벨 | 조건 (변동률 기준) |
+|---|---|
+| **risk-on** | XLK/XLY/XLC 상위 3 + XLU/XLP 하위 3 |
+| **risk-off** | XLU/XLP 상위 3 + XLK/XLY 하위 3 |
+| **리플레이션** | XLF/XLE/XLB 상위 3 + XLU 하위 |
+| **스태그플레이션 우려** | XLE/XLP 상위 + XLK/XLY 하위 |
+| **혼조** | 위 4개에 해당 안 됨 |
+
+### 체크리스트
 - 섹터 로테이션을 설명할 매크로 이벤트가 있는가?
 - 개별 종목 급등락 뒤에 실적/뉴스/애널리스트 코멘트가 있는가?
-- 금리·달러·원자재 변동이 어떤 섹터에 반영됐는가? (예: 금리↑ → 성장주·REITs 압박)
-- 지정학 이슈가 에너지·방산·반도체 같은 특정 섹터에 영향을 줬는가?
-- 한국 시장과 밸류체인이 얽힌 섹터(반도체, 자동차, 2차전지)는 어떻게 해석해야 하는가?
+- 금리·달러·원자재 변동이 어떤 섹터에 반영됐는가?
+- 지정학 이슈가 에너지·방산·반도체에 영향을 줬는가?
+- 한국 시장과 밸류체인이 얽힌 섹터(반도체, 2차전지, 조선)는 어떻게 해석해야 하는가?
 
-**불확실성 표기**: 인과가 명확하지 않으면 "~와 관련된 것으로 보임", "~가 원인 가능성"처럼 약하게 표현하고 단정을 피하세요. 거짓 확신은 이 skill의 가치를 망칩니다.
+**불확실성 표기**: 명확하지 않으면 "~로 보임", "~가 원인 가능성"으로 약하게 표현. 거짓 확신 금지.
 
 ## 보고서 템플릿
 
-아래 구조를 뼈대로 사용하세요. 빈 섹션은 생략 대신 "특이사항 없음"으로 명시해 독자가 **"데이터가 없는 것"과 "조사 안 된 것"을 구분**할 수 있게 합니다.
+아래 구조 그대로. 빈 섹션은 생략 대신 "특이사항 없음"으로 명시.
 
 ```markdown
+---
+date_kst: {YYYY-MM-DD}
+session_date: {전일 NY 정규장 마감 YYYY-MM-DD}
+generated_at: {ISO8601 KST}
+tl_dr: "{한줄평}"
+indices:
+  SPY: {dp}
+  QQQ: {dp}
+  DIA: {dp}
+  IWM: {dp}
+rotation_label: {risk-on|risk-off|리플레이션|스태그플레이션 우려|혼조}
+---
+
 # {YYYY-MM-DD} 야간 미국 증시 & 국제정세 브리핑
 
 > 생성 시각(KST): {HH:MM}
 > 기준 세션: {전일 NY 정규장 마감 날짜}
 
+{Sanity check 위반 시 여기에 ⚠️ 배너 삽입}
+
 ## 핵심 요약 (TL;DR)
 
 > **{한줄평 — 오늘 장을 한 문장으로 요약, 60~90자 권장, 반드시 굵게}**
 >
-> "왜 그런 흐름이었는지"의 인과를 한 문장으로 압축. 트리거(매크로 이벤트·지정학·실적) + 결과(섹터 방향·지수 디버전스) 두 축을 모두 담을 것. 단순 "S&P -0.07%" 같은 숫자만 나열하지 말 것. 독자가 이 한 줄만 봐도 오늘 미장의 본질을 파악할 수 있어야 함.
+> "왜 그런 흐름이었는지"의 인과를 한 문장으로 압축. 트리거(매크로 이벤트·지정학·실적) + 결과(섹터 방향·지수 디버전스) 두 축을 모두 담을 것.
 
-- (3~5줄 bullet, 한줄평을 뒷받침하는 세부 근거 — 숫자·섹터·이벤트)
+- (3~5줄 bullet, 한줄평을 뒷받침하는 세부 근거)
 
 ## 미국 3대 지수
 | 지수 (ETF 프록시) | 종가 | 변동 | 변동률 |
@@ -469,28 +275,34 @@ subagent가 빈 응답이나 오류를 내면 메인 orchestrator가 `WebSearch`
 | Nasdaq 100 (QQQ) |  |  |  |
 | Dow Jones (DIA) |  |  |  |
 | Russell 2000 (IWM) |  |  |  |
-| VIX |  |  |  |
+| VIX (VIXY 프록시) |  |  |  |
 
-**해석**: (지수 움직임의 맥락과 원인)
+**해석**: (지수 움직임의 맥락과 원인 [[n]](url))
 
-## 섹터 동향 (일간 변동률, finnhub get_quote)
+## 섹터 동향 — **{rotation_label}**
 | 섹터 | ETF | 변동률 |
 |---|---|---|
 | 강세 1~3위 |  |  |
 | 약세 1~3위 |  |  |
 
-**로테이션 분석**: (왜 이런 방향성이 나왔는지)
+**로테이션 분석**: (왜 이런 방향성이 나왔는지 [[n]](url))
 
 ## 주요 종목
 | 티커 | 종가 | 변동률 | 트리거 |
 |---|---|---|---|
-|  |  |  |  |
+|  |  |  | [[n]](url) |
+
+## 테마별 트리거 종목 (Tier 2/3 활성화 시에만)
+- **테마 A** ({트리거 키워드}): {티커} {변동률} — {해석 [[n]](url)}
 
 ## 원자재 · 금리 · 환율
 - **WTI 유가 (USO)**:
 - **금 (GLD)**:
 - **달러인덱스 (UUP)**:
 - **美 10년물 금리**:
+- **美 2년물 (SHY 프록시)** *(FOMC/CPI 당일만)*:
+- **하이일드 (HYG)**:
+- **장기국채 (TLT)**:
 - **USD/KRW**:
 - **USD/JPY**:
 
@@ -499,38 +311,52 @@ subagent가 빈 응답이나 오류를 내면 메인 orchestrator가 `WebSearch`
 - **아시아 전일**: Nikkei / HSI / KOSPI (또는 EWJ / EWH / EWY 프록시)
 
 ## 국제정세 & 매크로 이벤트
-- (연준 / 경제지표 / 지정학 / 원자재 이벤트를 항목별로)
+- (연준 / 경제지표 / 지정학 / 원자재 이벤트를 항목별로, 각각 [[n]](url))
 
 ## 오늘 한국장 관전 포인트
 - (위 데이터를 바탕으로 한국 투자자가 주목할 포인트 3~5개)
 
+## 전일 대비 변화
+> 직전 보고서 파일이 있을 때만 작성. 없으면 "이전 보고서 없음 (첫 실행)"으로 표시.
+- TL;DR 변화: {전일 한줄평} → {오늘 한줄평}
+- SPY: {전일 dp} → {오늘 dp}
+- QQQ: {전일 dp} → {오늘 dp}
+- VIX: {전일} → {오늘}
+- 로테이션 라벨: {전일} → {오늘}
+
+## ⚠️ 면책 조항
+본 보고서는 **정보 제공 목적**이며 특정 종목의 매수·매도 권유가 아닙니다. 모든 투자 결정은 본인 판단과 책임 하에 이뤄져야 합니다. 시세 수치는 MCP 데이터 소스(finnhub, alphavantage) 호출 시점 기준이며, 실제 체결가와 차이가 있을 수 있습니다.
+
 ## 데이터 품질 & 소스
-> 이 섹션은 **보고서 말미에 배치**합니다. 독자가 원하는 것은 시장 브리핑이지 수집 메타정보가 아닙니다. 데이터 품질·도구 상태·충돌 해소 내역은 각주/부록 성격이므로 TL;DR 위로 올리지 마세요.
+> 이 섹션은 **보고서 말미**에 배치합니다. 독자가 원하는 것은 시장 브리핑이지 수집 메타정보가 아닙니다.
 
 ### 수집 요약
 - 수집 성공률: {X}/{전체 섹션 수} 섹션 완전 확보
-- 주력 소스: finnhub get_quote (시세) / alphavantage forex (환율) / Tavily·WebSearch (뉴스)
+- 주력 소스: finnhub `get_quote` (시세) / alphavantage forex (환율) / Tavily·WebSearch (뉴스)
+- 활성화된 Tier: Tier 1 always-on{+ Tier 2: [테마들]}{+ Tier 3: [이벤트들]}
 - 실패/부분 확보: {섹션 이름 + 사유}
 
 ### 데이터 충돌 해소 내역
-- (있을 때만: 예 — subagent 인용 WTI +3.78% vs MCP USO -1.69% → 원칙대로 MCP 채택)
+- (있을 때만. 예: subagent 인용 WTI +3.78% vs MCP USO -1.69% → 원칙대로 MCP 채택)
 
 ### 사용한 도구
 - ✅/❌ 각 MCP·도구별 성공/실패 표시
 
-### 주요 링크
-- (인용한 뉴스 URL)
+### 주요 링크 (출처 번호 매핑)
+- [[1]]: {URL}
+- [[2]]: {URL}
+- ...
 ```
 
 ## 주의사항
 
-- **시세는 MCP가 진실**: 뉴스 기사에서 추출한 종가와 finnhub 실시간 데이터가 다른 경우가 실제로 있었습니다 (예: NVDA 뉴스 $183 vs finnhub $188.63). 시세는 반드시 MCP 값을 인용하세요.
-- **시간대 기준**: 한국 시간 기준 "어제 밤"은 미국 뉴욕 정규장 종료(KST 익일 새벽 5시경). 보고서 제목은 **한국 날짜**, 기준 세션은 **전일 NY 마감 날짜**.
-- **실패 허용**: 특정 도구 실패 시 전체 중단 금지. 대체 소스로 보고서 완성 후 "데이터 품질"에 실패 내역 명시. `yfinance` 같은 **알려진 실패 도구는 호출 자체를 생략**하는 것이 효율적.
+- **시세는 MCP가 진실**: 뉴스 기사에서 추출한 종가와 finnhub 실시간 데이터가 다르면 MCP 값 채택.
+- **시간대 기준**: 한국 시간 기준 "어제 밤"은 NY 정규장 종료(KST 익일 새벽 5시경). 보고서 제목은 **한국 날짜**, YAML `session_date`는 **전일 NY 마감 날짜**.
+- **실패 허용**: 특정 도구 실패 시 전체 중단 금지. `yfinance` 같은 알려진 실패 도구는 호출 자체를 생략.
 - **숫자의 진실성**: 모든 숫자는 이번 실행의 실제 도구 호출 값. 기억/추정 금지. 구하지 못하면 `N/A`.
-- **대용량 응답**: `finnhub news_sentiment` 등 대용량 응답 도구는 `Agent` 경유로만 호출해 요약본만 받으세요.
-- **뉴스 인용**: WebSearch/Tavily 결과는 출처 URL을 "데이터 소스"에 남기세요.
+- **대용량 응답**: `finnhub news_sentiment` 등은 subagent 경유로만 호출.
+- **뉴스 인용**: WebSearch/Tavily 결과는 번호 매겨 "주요 링크"에 기록. 본문은 `[[n]](url)` inline으로.
 - **덮어쓰기 금지**: 같은 날짜 파일이 있으면 `YYYY-MM-DD-HHMM.md`로 새 파일.
 - **보고 길이**: 사용자 채팅창에는 저장 경로 + TL;DR만. 본문 전체를 다시 붙여넣지 마세요.
-- **투자 조언 아님**: 정보 제공 목적이며 매수/매도 권유가 아니라는 면책 문구를 말미에.
 - **연/월 명시**: WebSearch 쿼리에 반드시 현재 연/월 포함.
+- **Tier 하드캡**: Tier 1 + 2 + 3 합쳐 finnhub 호출 55개 이하.
