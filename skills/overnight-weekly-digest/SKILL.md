@@ -13,7 +13,7 @@ overnight-market-report 플러그인의 일간 산출물을 기간 단위로 롤
 
 ## 출력 위치
 
-일간 리포트와 같은 디렉토리(기본 `~/workspace/overnight-market-report/`, 또는 `~/.claude/data/overnight-market-report/config.json`의 `output_dir`).
+일간 리포트와 같은 디렉토리(기본 `~/workspace/wooksang-marketplace-documents/overnight-market-report/`, 또는 `~/.claude/data/overnight-market-report/config.json`의 `output_dir`).
 
 - 주간: `digest-YYYY-WW.md` (ISO 주차)
 - 월간: `digest-YYYY-MM.md`

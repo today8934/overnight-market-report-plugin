@@ -25,7 +25,7 @@
 - **Sanity check 게이트** — 지수 전면 N/A, 변동률 ±10% 초과, 환율 전면 실패 등 이상치 감지 시 리포트 상단 ⚠️ 배너
 - **데이터 충돌 자동 해소** — 서브에이전트가 인용한 뉴스 수치와 MCP 실시간 값이 다르면 **MCP를 진실로 채택**하고 해소 내역을 리포트 말미에 기록
 - **주간/월간 롤업 skill (v0.4.0 신규)** — `overnight-weekly-digest` skill이 누적된 일간 리포트의 YAML frontmatter를 파싱해 지수 누적·로테이션 분포·반복 테마·핵심 뉴스 출처 빈도를 합성. "지난 주 미장 정리" / "monthly digest" 등으로 트리거
-- **저장 경로 configurable (v0.4.0)** — 기본 `~/workspace/overnight-market-report/`. `~/.claude/data/overnight-market-report/config.json`에 `output_dir` 필드로 사용자 지정 가능 (예: Obsidian vault 하위). 같은 날짜 파일이 이미 있으면 `YYYY-MM-DD-HHMM.md` 형태로 시간 suffix
+- **저장 경로 configurable (v0.4.0)** — 기본 `~/workspace/wooksang-marketplace-documents/overnight-market-report/`. `~/.claude/data/overnight-market-report/config.json`에 `output_dir` 필드로 사용자 지정 가능 (예: Obsidian vault 하위). 같은 날짜 파일이 이미 있으면 `YYYY-MM-DD-HHMM.md` 형태로 시간 suffix
 
 ---
 
